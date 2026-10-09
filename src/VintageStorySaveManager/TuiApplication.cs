@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+using System.Data;
 using Terminal.Gui;
 
 namespace VintageStorySaveManager;
@@ -14,7 +14,17 @@ internal sealed class TuiApplication
         Application.Init();
         try
         {
-            using var window = new Window { Title = "Vintage Story Save Manager (Esc to quit)" };
+            Button.DefaultShadow = ShadowStyle.None;
+            Dialog.DefaultShadow = ShadowStyle.None;
+            Window.DefaultShadow = ShadowStyle.None;
+
+            using var window = new Window
+            {
+                Title = "Vintage Story Save Manager (Esc to quit)",
+                Arrangement = ViewArrangement.Fixed,
+                ShadowStyle = ShadowStyle.None
+            };
+            AddVimFocusBindings(window);
 
             var heading = new Label
             {
@@ -29,7 +39,7 @@ internal sealed class TuiApplication
 
             var hint = new Label
             {
-                Text = "Lists show filename, world, play time, creation time, and installation.",
+                Text = "Tables show filename, world, play time, creation time, and installation.",
                 X = Pos.Center(),
                 Y = 12
             };
@@ -45,7 +55,14 @@ internal sealed class TuiApplication
 
     private static Button MenuButton(string text, int y, Action action)
     {
-        var button = new Button { Text = text, X = Pos.Center(), Y = y, Width = 26 };
+        var button = new Button
+        {
+            Text = text,
+            X = Pos.Center(),
+            Y = y,
+            Width = 26,
+            ShadowStyle = ShadowStyle.None
+        };
         button.Accepting += (_, _) =>
         {
             action();
@@ -82,8 +99,8 @@ internal sealed class TuiApplication
         EnsureReadable(backup);
         var saves = _repository.ListSaves();
         var destinationOptions = saves
-            .Select(save => new DestinationOption(save.DisplayLine, save))
-            .Append(new DestinationOption("<Save as new file>", null))
+            .Select(save => new DestinationOption(save))
+            .Append(new DestinationOption(null))
             .ToArray();
         var destination = SelectDestination(destinationOptions);
         if (destination is null)
@@ -168,38 +185,49 @@ internal sealed class TuiApplication
         }
 
         SaveEntry? selected = null;
-        using var dialog = new Dialog { Title = "Select backup to restore", Width = Dim.Percent(95), Height = Dim.Percent(85) };
-        var items = new ObservableCollection<EntryListItem>(entries.Select(entry => new EntryListItem(entry)));
-        var list = EntryList(items);
-        var cancel = new Button { Text = "_Cancel" };
-        var delete = new Button { Text = "_Delete" };
-        var restore = new Button { Text = "_Restore", IsDefault = true };
+        using var dialog = SelectionDialog("Select backup to restore");
+        var items = entries.ToList();
+        var table = EntryTable(items);
+        dialog.Add(table);
+        FocusTableWhenReady(dialog, table);
+        var cancel = DialogButton("_Cancel");
+        var delete = DialogButton("_Delete");
+        var restore = DialogButton("_Restore", isDefault: true);
         dialog.AddButton(cancel);
         dialog.AddButton(delete);
         dialog.AddButton(restore);
         cancel.Accepting += (_, _) => Application.RequestStop(dialog);
         restore.Accepting += (_, _) =>
         {
-            selected = Selected(items, list);
+            selected = Selected(items, table);
             Application.RequestStop(dialog);
         };
         delete.Accepting += (_, _) =>
         {
-            var item = Selected(items, list);
+            var item = Selected(items, table);
             if (item is not null && Confirm("Delete backup", $"Permanently delete {item.FileName}?", "Delete"))
             {
                 _repository.DeleteBackup(item);
-                var index = list.SelectedItem;
+                var index = table.SelectedRow;
                 items.RemoveAt(index);
-                list.SetSource(items);
+                ((DataTableSource)table.Table).DataTable.Rows.RemoveAt(index);
+                table.Update();
                 if (items.Count == 0)
                 {
                     Application.RequestStop(dialog);
                 }
+                else
+                {
+                    table.SetSelection(0, Math.Min(index, items.Count - 1), false);
+                }
             }
 
         };
-        dialog.Add(list);
+        table.CellActivated += (_, _) =>
+        {
+            selected = Selected(items, table);
+            Application.RequestStop(dialog);
+        };
         Application.Run(dialog);
         return selected;
     }
@@ -213,25 +241,25 @@ internal sealed class TuiApplication
         }
 
         SaveEntry? selected = null;
-        using var dialog = new Dialog { Title = title, Width = Dim.Percent(95), Height = Dim.Percent(85) };
-        var items = new ObservableCollection<EntryListItem>(entries.Select(entry => new EntryListItem(entry)));
-        var list = EntryList(items);
-        var cancel = new Button { Text = "_Cancel" };
-        var accept = new Button { Text = actionText, IsDefault = true };
+        using var dialog = SelectionDialog(title);
+        var table = EntryTable(entries);
+        dialog.Add(table);
+        FocusTableWhenReady(dialog, table);
+        var cancel = DialogButton("_Cancel");
+        var accept = DialogButton(actionText, isDefault: true);
         dialog.AddButton(cancel);
         dialog.AddButton(accept);
         cancel.Accepting += (_, _) => Application.RequestStop(dialog);
         accept.Accepting += (_, _) =>
         {
-            selected = Selected(items, list);
+            selected = Selected(entries, table);
             Application.RequestStop(dialog);
         };
-        list.Accepting += (_, _) =>
+        table.CellActivated += (_, _) =>
         {
-            selected = Selected(items, list);
+            selected = Selected(entries, table);
             Application.RequestStop(dialog);
         };
-        dialog.Add(list);
         Application.Run(dialog);
         return selected;
     }
@@ -239,28 +267,25 @@ internal sealed class TuiApplication
     private DestinationOption? SelectDestination(IReadOnlyList<DestinationOption> options)
     {
         DestinationOption? selected = null;
-        using var dialog = new Dialog { Title = "Select restore destination", Width = Dim.Percent(95), Height = Dim.Percent(85) };
-        var items = new ObservableCollection<DestinationOption>(options);
-        var list = new ListView
-        {
-            X = 1,
-            Y = 1,
-            Width = Dim.Fill(1),
-            Height = Dim.Fill(1),
-            BorderStyle = LineStyle.Single
-        };
-        list.SetSource(items);
-        var cancel = new Button { Text = "_Cancel" };
-        var accept = new Button { Text = "_Select", IsDefault = true };
+        using var dialog = SelectionDialog("Select restore destination");
+        var table = DestinationTable(options);
+        dialog.Add(table);
+        FocusTableWhenReady(dialog, table);
+        var cancel = DialogButton("_Cancel");
+        var accept = DialogButton("_Select", isDefault: true);
         dialog.AddButton(cancel);
         dialog.AddButton(accept);
         cancel.Accepting += (_, _) => Application.RequestStop(dialog);
         accept.Accepting += (_, _) =>
         {
-            selected = items[list.SelectedItem];
+            selected = options[table.SelectedRow];
             Application.RequestStop(dialog);
         };
-        dialog.Add(list);
+        table.CellActivated += (_, _) =>
+        {
+            selected = options[table.SelectedRow];
+            Application.RequestStop(dialog);
+        };
         Application.Run(dialog);
         return selected;
     }
@@ -268,7 +293,7 @@ internal sealed class TuiApplication
     private (string FileName, string WorldName)? PromptNewSave(SaveEntry backup)
     {
         (string FileName, string WorldName)? result = null;
-        using var dialog = new Dialog { Title = "Restore as new save", Width = 70, Height = 11 };
+        using var dialog = FormDialog("Restore as new save", 70, 11);
         var fileLabel = new Label { Text = "Filename (without .vcdbs):", X = 1, Y = 1 };
         var file = new TextField
         {
@@ -279,8 +304,8 @@ internal sealed class TuiApplication
         };
         var worldLabel = new Label { Text = "World name:", X = 1, Y = 4 };
         var world = new TextField { Text = backup.WorldName, X = 1, Y = 5, Width = Dim.Fill(1) };
-        var cancel = new Button { Text = "_Cancel" };
-        var restore = new Button { Text = "_Restore", IsDefault = true };
+        var cancel = DialogButton("_Cancel");
+        var restore = DialogButton("_Restore", isDefault: true);
         dialog.AddButton(cancel);
         dialog.AddButton(restore);
         cancel.Accepting += (_, _) => Application.RequestStop(dialog);
@@ -307,11 +332,11 @@ internal sealed class TuiApplication
     private string? PromptText(string title, string labelText, string initial, string actionText)
     {
         string? result = null;
-        using var dialog = new Dialog { Title = title, Width = 70, Height = 8 };
+        using var dialog = FormDialog(title, 70, 8);
         var label = new Label { Text = labelText, X = 1, Y = 1 };
         var field = new TextField { Text = initial, X = 1, Y = 2, Width = Dim.Fill(1) };
-        var cancel = new Button { Text = "_Cancel" };
-        var accept = new Button { Text = $"_{actionText}", IsDefault = true };
+        var cancel = DialogButton("_Cancel");
+        var accept = DialogButton($"_{actionText}", isDefault: true);
         dialog.AddButton(cancel);
         dialog.AddButton(accept);
         cancel.Accepting += (_, _) => Application.RequestStop(dialog);
@@ -325,22 +350,148 @@ internal sealed class TuiApplication
         return result;
     }
 
-    private static ListView EntryList(ObservableCollection<EntryListItem> items)
+    private static TableView EntryTable(IEnumerable<SaveEntry> entries)
     {
-        var list = new ListView
+        var data = SaveTableSchema();
+        foreach (var entry in entries)
+        {
+            data.Rows.Add(entry.FileName, entry.WorldName, entry.Played, entry.Created, entry.Location.Name);
+        }
+
+        return CreateTable(data);
+    }
+
+    private static TableView DestinationTable(IEnumerable<DestinationOption> options)
+    {
+        var data = SaveTableSchema();
+        foreach (var option in options)
+        {
+            var entry = option.Save;
+            data.Rows.Add(
+                entry?.FileName ?? "<Save as new file>",
+                entry?.WorldName ?? string.Empty,
+                entry?.Played ?? string.Empty,
+                entry?.Created ?? string.Empty,
+                entry?.Location.Name ?? string.Empty);
+        }
+
+        return CreateTable(data);
+    }
+
+    private static DataTable SaveTableSchema()
+    {
+        var data = new DataTable();
+        data.Columns.Add("Filename");
+        data.Columns.Add("World");
+        data.Columns.Add("Played");
+        data.Columns.Add("Created");
+        data.Columns.Add("Installation");
+        return data;
+    }
+
+    private static TableView CreateTable(DataTable data)
+    {
+        var table = new TableView(new DataTableSource(data))
         {
             X = 1,
             Y = 1,
             Width = Dim.Fill(1),
-            Height = Dim.Fill(1),
-            BorderStyle = LineStyle.Single
+            Height = Dim.Fill(2),
+            BorderStyle = LineStyle.Single,
+            ShadowStyle = ShadowStyle.None,
+            FullRowSelect = true,
+            MultiSelect = false,
+            CollectionNavigator = null
         };
-        list.SetSource(items);
-        return list;
+        table.Style.ShowHeaders = true;
+        table.Style.AlwaysShowHeaders = true;
+        table.Style.ShowVerticalHeaderLines = true;
+        table.Style.ShowVerticalCellLines = true;
+        AddVimTableNavigation(table);
+        return table;
     }
 
-    private static SaveEntry? Selected(ObservableCollection<EntryListItem> items, ListView list) =>
-        items.Count == 0 ? null : items[list.SelectedItem].Entry;
+    private static Dialog SelectionDialog(string title)
+    {
+        var dialog = new Dialog
+        {
+            Title = title,
+            Width = Dim.Percent(95),
+            Height = Dim.Percent(85),
+            Arrangement = ViewArrangement.Fixed,
+            ShadowStyle = ShadowStyle.None
+        };
+        AddVimFocusBindings(dialog);
+        return dialog;
+    }
+
+    private static Dialog FormDialog(string title, int width, int height) => new()
+    {
+        Title = title,
+        Width = width,
+        Height = height,
+        Arrangement = ViewArrangement.Fixed,
+        ShadowStyle = ShadowStyle.None
+    };
+
+    private static Button DialogButton(string text, bool isDefault = false) => new()
+    {
+        Text = text,
+        IsDefault = isDefault,
+        ShadowStyle = ShadowStyle.None
+    };
+
+    private static void FocusTableWhenReady(Dialog dialog, TableView table) =>
+        dialog.Ready += (_, _) => table.SetFocus();
+
+    private static void AddVimTableNavigation(TableView table)
+    {
+        table.KeyBindings.Add(Key.H, table, Command.Left);
+        table.KeyBindings.Add(Key.J, table, Command.Down);
+        table.KeyBindings.Add(Key.K, table, Command.Up);
+        table.KeyBindings.Add(Key.L, table, Command.Right);
+
+        table.KeyDown += (_, key) =>
+        {
+            var offset = key switch
+            {
+                _ when key == Key.H => (-1, 0),
+                _ when key == Key.J => (0, 1),
+                _ when key == Key.K => (0, -1),
+                _ when key == Key.L => (1, 0),
+                _ => ((int X, int Y)?)null
+            };
+
+            if (offset is not null)
+            {
+                table.ChangeSelectionByOffset(offset.Value.X, offset.Value.Y, false);
+                table.EnsureSelectedCellIsVisible();
+                table.SetNeedsDraw();
+                key.Handled = true;
+            }
+        };
+    }
+
+    private static void AddVimFocusBindings(View view)
+    {
+        view.KeyDown += (_, key) =>
+        {
+            NavigationDirection? direction = key switch
+            {
+                _ when key == Key.H || key == Key.K => NavigationDirection.Backward,
+                _ when key == Key.J || key == Key.L => NavigationDirection.Forward,
+                _ => null
+            };
+
+            if (direction is not null)
+            {
+                key.Handled = view.AdvanceFocus(direction.Value, TabBehavior.TabStop);
+            }
+        };
+    }
+
+    private static SaveEntry? Selected(IReadOnlyList<SaveEntry> entries, TableView table) =>
+        entries.Count == 0 ? null : entries[table.SelectedRow];
 
     private bool Confirm(string title, string message, string action) =>
         MessageBox.Query(title, message, "Cancel", action) == 1;
@@ -378,14 +529,5 @@ internal sealed class TuiApplication
         return legacy.Success ? legacy.Groups[1].Value : name;
     }
 
-    private sealed record EntryListItem(SaveEntry Entry)
-    {
-        public override string ToString() => Entry.DisplayLine;
-    }
-
-    private sealed record DestinationOption(string Display, SaveEntry? Save)
-    {
-        public override string ToString() => Display;
-    }
+    private sealed record DestinationOption(SaveEntry? Save);
 }
-

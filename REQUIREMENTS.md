@@ -38,6 +38,8 @@ The application must locate the relevant savegame data beneath every detected ro
 - Support subcommands for direct operations, including at minimum backup and restore.
 - When invoked without a subcommand, open an interactive menu-driven TUI.
 - Interactive workflows must cover backup, restore, backup deletion, and world renaming.
+- Support both arrow-key and Vim-style `h`/`j`/`k`/`l` navigation in menus and selection tables.
+- Display column headers on save and backup selection tables.
 - Destructive actions must require clear confirmation.
 - Errors must be actionable and must not leave a partially copied or corrupted destination file.
 

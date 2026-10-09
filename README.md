@@ -23,6 +23,8 @@ dotnet run --project src/VintageStorySaveManager -- backup --save flatpak:main.v
 
 Use `vsm help` for the full command list after publishing.
 
+In the TUI, use the arrow keys or `h`/`j`/`k`/`l` to navigate menus and save tables. Table headers identify the filename, world, play time, creation time, and installation. Press Enter to activate the selected item and Esc to close the current dialog.
+
 Publish a runnable application to `dist/`:
 
 ```sh
