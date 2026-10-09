@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Build a .NET terminal user interface (TUI) application for managing Vintage Story savegames and backups. It replaces the fixed-file backup workflow in `vstorybackup.sh` and supports selecting saves, inspecting metadata, restoring backups, deleting backups, and renaming worlds.
+Build a .NET terminal user interface (TUI) application for managing Vintage Story savegames and backups. It supports selecting saves, inspecting metadata, restoring backups, deleting backups, and renaming worlds.
 
 ## Runtime and technology constraints
 
@@ -31,9 +31,7 @@ The application must locate the relevant savegame data beneath every detected ro
   - World name.
   - Total time played, rendered in a human-readable hours/minutes form.
   - Creation time, rendered like `9 Oct 2026, 22:59`.
-- Reference fixtures currently available:
-  - `backup.vcdbs`: world name `Outer Worlds`, played time `4 hours 56 minutes`.
-  - `outer worlds.vcdbs`: world name `Outer Worlds`, played time `11 hours 28 minutes`.
+- Metadata extracted from each savegame must match the values displayed by Vintage Story.
 
 ## Command-line and interactive UX
 
@@ -97,8 +95,8 @@ The application must locate the relevant savegame data beneath every detected ro
 - Running the program with no arguments opens the interactive main menu.
 - CLI backup and restore subcommands are usable without entering the TUI.
 - Both Flatpak and non-Flatpak configuration roots are detected when present.
-- The two reference saves display `Outer Worlds` and their respective `4h 56m` / `11h 28m` play times.
-- A user can select and back up either reference save.
+- Savegame world names and played-time values match what the game displays.
+- A user can select and back up any discovered valid save.
 - A user can restore a backup over an existing save, with an optional safety backup.
 - A user can restore a backup to a validated new filename and choose its world name.
 - A user can delete a backup only after confirmation.
@@ -107,8 +105,8 @@ The application must locate the relevant savegame data beneath every detected ro
 
 ## Resolved implementation decisions
 
-- Saves are read from `VintagestoryData/Saves` beneath each detected configuration root; backups remain in the script-compatible `Saves/backup` directory.
-- Legacy backups created by `vstorybackup.sh` remain discoverable. New backups use filesystem-safe names in the form `yyyy-MM-dd_HH-mm-ss-save-name.vcdbs`.
+- Saves are read from `VintagestoryData/Saves` beneath each detected configuration root; backups remain in `Saves/backup`.
+- New backups use filesystem-safe names in the form `yyyy-MM-dd_HH-mm-ss-save-name.vcdbs`.
 - The single row in SQLite's `gamedata` table contains the protobuf-net `SaveGame` payload. `WorldName` and `TotalSecondsPlayed` come from that dynamically loaded game type.
 - The game directory is resolved from `VSM_GAME_DIR`, then `VINTAGE_STORY`, native installation candidates, and user/system Flatpak deployments.
 - Saves from all detected installations appear together and include an installation-qualified ID such as `flatpak:main.vcdbs`, preventing ambiguity.
