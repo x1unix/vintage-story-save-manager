@@ -325,6 +325,7 @@ internal sealed class TuiApplication
 
         };
         dialog.Add(fileLabel, file, worldLabel, world);
+        dialog.Ready += (_, _) => file.SetFocus();
         Application.Run(dialog);
         return result;
     }
