@@ -35,16 +35,17 @@ internal sealed class TuiApplication
             var backup = MenuButton("_Backup save", 3, BackupWorkflow);
             var restore = MenuButton("_Restore backup", 5, RestoreWorkflow);
             var rename = MenuButton("_Rename world", 7, RenameWorkflow);
-            var quit = MenuButton("_Quit", 9, () => Application.RequestStop(window));
+            var repair = MenuButton("R_epair save", 9, RepairWorkflow);
+            var quit = MenuButton("_Quit", 11, () => Application.RequestStop(window));
 
             var hint = new Label
             {
                 Text = "Tables show filename, world, play time, creation time, and installation.",
                 X = Pos.Center(),
-                Y = 12
+                Y = 14
             };
 
-            window.Add(heading, backup, restore, rename, quit, hint);
+            window.Add(heading, backup, restore, rename, repair, quit, hint);
             Application.Run(window);
         }
         finally
@@ -174,6 +175,95 @@ internal sealed class TuiApplication
         var result = _repository.RenameWorld(selected, newName);
         MessageBox.Query("Rename complete", $"World renamed to '{result.WorldName}'.", "OK");
     });
+
+    private void RepairWorkflow() => Guard(() =>
+    {
+        var source = SelectEntry("Select save to scan or repair", _repository.ListSaves(), "_Select");
+        if (source is null)
+        {
+            return;
+        }
+
+        var mode = MessageBox.Query("Repair save",
+            "Close this world in Vintage Story before continuing.\nScan for damaged world records, or choose a backup to use for repair.\nRepairs are written to a new save file.",
+            "Cancel", "Scan only", "Choose backup");
+        if (mode < 1)
+        {
+            return;
+        }
+
+        var backup = mode == 2 ? SelectEntry("Select backup of the same world", _repository.ListBackups(), "_Select") : null;
+        if (mode == 2 && backup is null)
+        {
+            return;
+        }
+
+        using var session = RunRepairTask("Scanning save", token => _repository.PrepareRepair(source, backup, token));
+        var report = session.Report;
+        if (!report.CanRepair)
+        {
+            MessageBox.Query("Scan complete", report.Summary + "\n\n" +
+                (report.DamagedRecords == 0 ? "No damaged records detected." : "Choose a compatible backup with valid replacements for every damaged record.") +
+                "\nNo save was created.\nThese checks cannot detect missing rows or all damage inside mod data.", "OK");
+            return;
+        }
+
+        var filename = PromptText("Save repaired copy", "New filename (without .vcdbs):",
+            Path.GetFileNameWithoutExtension(source.FileName) + "-repaired", "Continue");
+        if (filename is null)
+        {
+            return;
+        }
+
+        var destination = _repository.NewSavePath(source.Location, filename);
+        if (!Confirm("Create repaired save", report.Summary +
+            $"\n\nBackup: {backup!.FileName} ({backup.Played})\nSource: {source.FileName} ({source.Played})\nNew file: {Path.GetFileName(destination)}\n\n" + RepairReport.Limitations,
+            "Create copy"))
+        {
+            return;
+        }
+
+        var result = RunRepairTask("Writing and validating repair", token => _repository.CompleteRepair(session, filename, token));
+        MessageBox.Query("Repair complete", $"Created:\n{result.Path}\n\nRestored {report.DamagedRecords} records.\nWorld name: {result.WorldName}\nTest this copy in Vintage Story.", "OK");
+    });
+
+    private static T RunRepairTask<T>(string title, Func<CancellationToken, T> work)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var dialog = FormDialog(title, 70, 8);
+        var status = new Label { Text = "Checking database and game data. This may take a while.", X = 1, Y = 1 };
+        dialog.Add(status);
+        var cancel = DialogButton("_Cancel");
+        dialog.AddButton(cancel);
+        void Cancel()
+        {
+            cancellation.Cancel();
+            status.Text = "Cancelling after the current database operation...";
+        }
+
+        cancel.Accepting += (_, _) => Cancel();
+        var completed = false;
+        dialog.Closing += (_, args) =>
+        {
+            if (!completed)
+            {
+                args.Cancel = true;
+                Cancel();
+            }
+        };
+        Task<T>? task = null;
+        dialog.Ready += (_, _) =>
+        {
+            task = Task.Run(() => work(cancellation.Token));
+            _ = task.ContinueWith(_ => Application.Invoke(() =>
+            {
+                completed = true;
+                Application.RequestStop(dialog);
+            }), TaskScheduler.Default);
+        };
+        Application.Run(dialog);
+        return (task ?? throw new UserFacingException("The repair task did not start.")).GetAwaiter().GetResult();
+    }
 
     private SaveEntry? SelectBackupForRestore()
     {
@@ -508,6 +598,10 @@ internal sealed class TuiApplication
         try
         {
             action();
+        }
+        catch (OperationCanceledException)
+        {
+            MessageBox.Query("Cancelled", "Repair cancelled. No repaired save was published.", "OK");
         }
         catch (Exception exception)
         {

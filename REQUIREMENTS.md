@@ -37,7 +37,7 @@ The application must locate the relevant savegame data beneath every detected ro
 
 - Support subcommands for direct operations, including at minimum backup and restore.
 - When invoked without a subcommand, open an interactive menu-driven TUI.
-- Interactive workflows must cover backup, restore, backup deletion, and world renaming.
+- Interactive workflows must cover backup, restore, backup deletion, world renaming, and repair.
 - Support both arrow-key and Vim-style `h`/`j`/`k`/`l` navigation in menus and selection tables.
 - Display column headers on save and backup selection tables.
 - Destructive actions must require clear confirmation.
@@ -83,6 +83,20 @@ The application must locate the relevant savegame data beneath every detected ro
 4. Update the world name in the save database using the game's protobuf-backed save types.
 5. Preserve the rest of the save data.
 
+## Repair workflow
+
+1. Select a save to scan, optionally selecting a backup as a source of replacement records.
+2. Work exclusively on consistent SQLite snapshots; require valid SQLite structure and decodable world metadata.
+3. Validate all existing `mapregion`, `mapchunk`, and `chunk` payloads with the installed game types and protobuf-net runtime; decompress terrain data as well.
+4. Require matching world identifiers, seeds, dimensions, creation/last-saved game versions, and world-generation versions. Reject backups ahead of the source's playtime and require the installed game version to match the save.
+5. Report counts and each damaged record, including whether a valid backup replacement is available. CLI scans support `--json` and write no save unless `--new` is supplied.
+6. Allow repair only when all detected damaged records have valid replacements in the selected backup. Write to a validated, unused filename alongside the source; never replace the source or an existing destination.
+7. Preserve metadata, player data, and all unaffected records byte-for-byte. Verify those guarantees, database integrity, and all repaired-world payloads before publication.
+8. Explain that affected records revert to the backup's state and may roll back builds, containers, and entities. Show source and backup playtime before TUI confirmation.
+9. Keep the TUI responsive during scans and writes, support cancellation, and clean up staged output on cancellation or failure.
+
+Repair does not perform SQLite structural recovery, regenerate terrain, identify missing rows, repair metadata/player payloads, or guarantee semantic validity of opaque mod data. Recommend testing the new copy in the game.
+
 ## Data safety and operational requirements
 
 - Treat live saves and backups as user data that must not be silently overwritten or deleted.
@@ -103,6 +117,7 @@ The application must locate the relevant savegame data beneath every detected ro
 - A user can restore a backup to a validated new filename and choose its world name.
 - A user can delete a backup only after confirmation.
 - A user can rename a world's display name without changing unrelated save data.
+- A user can scan damaged world payloads and repair them into a new save using a compatible backup, with a machine-readable CLI report and a TUI preview.
 - Interrupted or failed backup/restore operations do not corrupt the source or an existing destination.
 
 ## Resolved implementation decisions

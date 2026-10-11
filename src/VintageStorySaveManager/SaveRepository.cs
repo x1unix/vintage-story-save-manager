@@ -5,9 +5,9 @@ namespace VintageStorySaveManager;
 internal sealed class SaveRepository
 {
     private readonly IReadOnlyList<SaveLocation> _locations;
-    private readonly DynamicSaveCodec _codec;
+    private readonly ISaveCodec _codec;
 
-    public SaveRepository(IReadOnlyList<SaveLocation> locations, DynamicSaveCodec codec)
+    public SaveRepository(IReadOnlyList<SaveLocation> locations, ISaveCodec codec)
     {
         _locations = locations;
         _codec = codec;
@@ -22,6 +22,16 @@ internal sealed class SaveRepository
     public SaveEntry ResolveSave(string identifier) => Resolve(identifier, ListSaves(), "save");
 
     public SaveEntry ResolveBackup(string identifier) => Resolve(identifier, ListBackups(), "backup");
+
+    public RepairSession PrepareRepair(SaveEntry source, SaveEntry? backup = null, CancellationToken cancellationToken = default) =>
+        RepairSession.Prepare(source, backup, _codec, cancellationToken);
+
+    public SaveEntry CompleteRepair(RepairSession session, string newName, CancellationToken cancellationToken = default)
+    {
+        var destination = NewSavePath(session.Source.Location, newName);
+        session.WriteRepairedSave(destination, cancellationToken);
+        return ReadEntry(destination, session.Source.Location, isBackup: false);
+    }
 
     public SaveEntry Backup(SaveEntry source)
     {
@@ -201,7 +211,7 @@ internal sealed class SaveRepository
 
     private SaveMetadata ReadMetadata(string path) => _codec.Read(ReadGameData(path));
 
-    private static byte[] ReadGameData(string path)
+    internal static byte[] ReadGameData(string path)
     {
         try
         {
@@ -246,7 +256,7 @@ internal sealed class SaveRepository
         transaction.Commit();
     }
 
-    private static void SnapshotDatabase(string sourcePath, string destinationPath)
+    internal static void SnapshotDatabase(string sourcePath, string destinationPath)
     {
         var temporary = $"{destinationPath}.{Guid.NewGuid():N}.snapshot";
         try
@@ -266,7 +276,7 @@ internal sealed class SaveRepository
         }
     }
 
-    private static SqliteConnection Open(string path, SqliteOpenMode mode)
+    internal static SqliteConnection Open(string path, SqliteOpenMode mode)
     {
         var builder = new SqliteConnectionStringBuilder
         {
@@ -313,16 +323,16 @@ internal sealed class SaveRepository
         return created.Year > 1971 ? created : File.GetLastWriteTime(path);
     }
 
-    private static void EnsureManagedDestination(string path, SaveLocation location)
+    internal static void EnsureManagedDestination(string path, SaveLocation location)
     {
         if (!IsPathInside(path, location.SavesDirectory) || IsPathInside(path, location.BackupDirectory))
         {
-            throw new UserFacingException("Restore destinations must be directly inside a detected Saves directory.");
+            throw new UserFacingException("Save destinations must be directly inside a detected Saves directory.");
         }
 
         if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(path)), Path.GetFullPath(location.SavesDirectory), StringComparison.Ordinal))
         {
-            throw new UserFacingException("Restore destinations cannot contain subdirectories.");
+            throw new UserFacingException("Save destinations cannot contain subdirectories.");
         }
     }
 

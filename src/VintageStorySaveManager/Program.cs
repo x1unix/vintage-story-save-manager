@@ -58,6 +58,11 @@ internal static class Program
                           [--location <name>] [--world-name <name>] [--json]
               vsm delete-backup --backup <id|filename|path> [--yes]
               vsm rename --save <id|filename|path> --world-name <name> [--yes] [--json]
+              vsm repair --save <id|filename|path> [--backup <id|filename|path>]
+                         [--new <filename>] [--json]
+
+            Repair scans only unless --new is supplied. Writing requires a compatible backup
+            and a new filename; source saves are never replaced. Close the world before repair.
             """);
         return 0;
     }

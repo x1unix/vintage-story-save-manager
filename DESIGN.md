@@ -25,6 +25,8 @@ The game install is resolved from `VSM_GAME_DIR`, `VINTAGE_STORY`, common native
 4. Restore by copying to a temporary sibling, optionally changing `WorldName`, validating and closing the result, and atomically renaming it into place.
 5. Rename through the same temporary-copy and atomic-replace path.
 6. Delete only files already discovered inside a managed backup directory and only after confirmation.
+7. Prepare repair through `SaveRepository.PrepareRepair`: `RepairSession` owns consistent temporary source/backup snapshots, checks SQLite schemas/integrity and world identity, then records damaged payloads and replacement availability. `DynamicSaveCodec` creates a `DynamicRepairValidator` using the installed protobuf types and terrain decompressor. Runtime/dependency failures abort validation rather than classifying all records as damaged.
+8. Complete repair through `SaveRepository.CompleteRepair` with a new filename. Copy the source snapshot into a sibling staging file, replace only planned damaged rows in a transaction, revalidate all payloads and SQLite structure, compare metadata/player rows and every unaffected world payload, then atomically move without overwrite. Source and backup snapshots remain fixed between preview and completion. Dispose the session to remove snapshots. Reject unexpected triggers/schemas and incompatible world/game versions.
 
 ## CLI
 
@@ -34,12 +36,15 @@ The game install is resolved from `VSM_GAME_DIR`, `VINTAGE_STORY`, common native
 - `vsm restore --backup <id-or-path> (--destination <id-or-path> | --new <name>) [--world-name <name>] [--backup-existing] [--yes] [--json]`.
 - `vsm delete-backup --backup <id-or-path> [--yes]`.
 - `vsm rename --save <id-or-path> --world-name <name> [--yes]`.
+- `vsm repair --save <id-or-path> [--backup <id-or-path>] [--new <filename>] [--json]`. Without `--new`, scan only; writing requires a compatible backup and valid replacements for all damage. JSON output contains mode, report, output (or null), and limitations. A completed scan exits successfully even if it finds damage; an unsuccessful write exits with an error.
 
 An exact full path always resolves. A basename or displayed ID resolves only when unique.
 
 ## TUI
 
-The main menu offers Backup, Restore, Rename world, and Quit. Tables show filename, world name, played time, creation time, and installation. Restore selection also exposes deletion. Deleting a backup refreshes the list and closes the selection dialog when no backups remain; only choosing Restore or activating a table row opens destination selection. Dialog buttons consume their acceptance events so other actions cannot activate the default button. All destructive actions use modal confirmation prompts.
+The main menu offers Backup, Restore, Rename world, Repair save, and Quit. Tables show filename, world name, played time, creation time, and installation. Restore selection also exposes deletion. Deleting a backup refreshes the list and closes the selection dialog when no backups remain; only choosing Restore or activating a table row opens destination selection. Dialog buttons consume their acceptance events so other actions cannot activate the default button. All destructive actions use modal confirmation prompts.
+
+Repair offers a scan-only mode or backup selection, followed by a damage summary, new-filename prompt, and rollback confirmation. Scans and writes run in a worker task with a cancellable progress dialog. Cancellation is checked between records and before publication; SQLite backup/integrity operations finish before cancellation takes effect.
 
 ## Verification
 
@@ -47,3 +52,4 @@ The main menu offers Backup, Restore, Rename world, and Quit. Tables show filena
 - Build and test the .NET solution.
 - Run metadata inspection against the installed Flatpak and verify the two known saves.
 - Exercise backup, restore-as-new, rename, replace-with-safety-backup, and deletion in a temporary data root; never modify the user's live saves during tests.
+- Exercise repair on isolated copies with the installed game's decoder, checking that only damaged rows are replaced and all metadata/player rows are preserved. Unit-test compatibility, missing replacements, cancellation, failures, and refusal to overwrite.

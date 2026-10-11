@@ -25,6 +25,7 @@ internal sealed class CommandLine
             "restore" => Restore(options),
             "delete-backup" => DeleteBackup(options),
             "rename" => Rename(options),
+            "repair" => Repair(options),
             "help" or "--help" or "-h" => Help(),
             _ => throw new UserFacingException($"Unknown command '{args[0]}'. Run 'vsm help' for usage.")
         };
@@ -107,6 +108,50 @@ internal sealed class CommandLine
         RequireConfirmation(options, $"Rename world '{save.WorldName}' to '{worldName}' in {save.FileName}?");
         var result = _repository.RenameWorld(save, worldName);
         WriteResult(result, options.Has("json"), $"World renamed to '{result.WorldName}'.");
+        return 0;
+    }
+
+    private int Repair(ParsedOptions options)
+    {
+        options.ValidateAllowed("save", "backup", "new", "json");
+        var source = _repository.ResolveSave(options.Required("save"));
+        var backup = options.Has("backup") ? _repository.ResolveBackup(options.Required("backup")) : null;
+        var newName = options.Has("new") ? options.Required("new") : null;
+        if (newName is not null)
+        {
+            if (backup is null)
+            {
+                throw new UserFacingException("Creating a repaired save requires --backup. Omit --new to scan only.");
+            }
+
+            _ = _repository.NewSavePath(source.Location, newName);
+        }
+
+        using var session = _repository.PrepareRepair(source, backup);
+        var result = newName is null ? null : _repository.CompleteRepair(session, newName);
+        if (options.Has("json"))
+        {
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                Mode = result is null ? "scan" : "repair",
+                session.Report,
+                Output = result is null ? null : ToJson(result),
+                Limitations = RepairReport.Limitations
+            }, JsonOptions));
+        }
+        else
+        {
+            Console.WriteLine(session.Report.Summary);
+            Console.WriteLine($"Source played: {session.Report.SourcePlayedSeconds} seconds; backup played: {session.Report.BackupPlayedSeconds?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "not selected"} seconds.");
+            foreach (var issue in session.Report.Issues)
+            {
+                Console.WriteLine($"  {issue.Table} {issue.Position}: {issue.Reason} Replacement: {(issue.ReplacementAvailable ? "available" : issue.BackupError)}");
+            }
+
+            Console.WriteLine(result is null ? "Scan only; no save was created. Supply --backup and --new to repair." : $"Repaired save created: {result.Path}");
+            Console.WriteLine(RepairReport.Limitations);
+        }
+
         return 0;
     }
 
@@ -211,6 +256,11 @@ internal sealed class CommandLine
                           [--location <name>] [--world-name <name>] [--json]
               vsm delete-backup --backup <id|filename|path> [--yes]
               vsm rename --save <id|filename|path> --world-name <name> [--yes] [--json]
+              vsm repair --save <id|filename|path> [--backup <id|filename|path>]
+                         [--new <filename>] [--json]
+
+            Repair scans only unless --new is supplied. Writing requires a compatible backup
+            and a new filename; source saves are never replaced. Close the world before repair.
 
             Environment:
               VSM_DATA_ROOTS   Colon-separated config roots (or Saves directories)
@@ -261,6 +311,18 @@ internal sealed class ParsedOptions
     }
 
     public bool Has(string name) => _values.ContainsKey(name);
+    public void ValidateAllowed(params string[] names)
+    {
+        if (Positionals.Count != 0 || _values.Keys.Any(key => !names.Contains(key, StringComparer.OrdinalIgnoreCase)))
+        {
+            throw new UserFacingException("Unknown repair argument. Use --save, --backup, --new, and --json; repair never replaces an existing save.");
+        }
+
+        if (_values.TryGetValue("json", out var value) && value is not null)
+        {
+            throw new UserFacingException("--json does not take a value.");
+        }
+    }
     public string? Get(string name) => _values.GetValueOrDefault(name);
     public string Required(string name) => Get(name) ?? throw new UserFacingException($"Missing required option --{name}.");
 }

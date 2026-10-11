@@ -3,7 +3,7 @@ using System.Runtime.Loader;
 
 namespace VintageStorySaveManager;
 
-internal sealed class DynamicSaveCodec : IDisposable
+internal sealed class DynamicSaveCodec : ISaveCodec, IDisposable
 {
     private readonly string _gameDirectory;
     private readonly AssemblyLoadContext _loadContext;
@@ -95,6 +95,26 @@ internal sealed class DynamicSaveCodec : IDisposable
         Invoke(_serialize, null, output, save);
         return output.ToArray();
     }
+
+    public RepairIdentity ReadRepairIdentity(ReadOnlySpan<byte> payload)
+    {
+        var save = Deserialize(payload);
+        string Text(string name) => GetValue(RequiredMember(name), save)?.ToString()
+            ?? throw new UserFacingException($"Save metadata is missing {name}; repair cannot verify compatibility.");
+        int Number(string name) => Convert.ToInt32(GetValue(RequiredMember(name), save), System.Globalization.CultureInfo.InvariantCulture);
+        var identity = new RepairIdentity(Text("SavegameIdentifier"), Number("Seed"), Number("MapSizeX"),
+            Number("MapSizeY"), Number("MapSizeZ"), Text("CreatedGameVersion"), Text("LastSavedGameVersion"), Number("CreatedWorldGenVersion"));
+        if (string.IsNullOrWhiteSpace(identity.WorldId) || string.IsNullOrWhiteSpace(identity.LastSavedGameVersion) ||
+            identity.MapSizeX <= 0 || identity.MapSizeY <= 0 || identity.MapSizeZ <= 0)
+        {
+            throw new UserFacingException("Save metadata has no valid world identifier, dimensions, or game version; repair cannot verify compatibility.");
+        }
+
+        return identity;
+    }
+
+    public IRepairValidator CreateRepairValidator(string gameVersion) => new DynamicRepairValidator(
+        LoadRequired("VintagestoryLib.dll"), LoadRequired("VintagestoryAPI.dll"), _deserialize, _serialize, gameVersion);
 
     private object Deserialize(ReadOnlySpan<byte> payload)
     {
