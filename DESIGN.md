@@ -39,7 +39,7 @@ An exact full path always resolves. A basename or displayed ID resolves only whe
 
 ## TUI
 
-The main menu offers Backup, Restore, Rename world, and Quit. Tables show filename, world name, played time, creation time, and installation. Restore selection also exposes deletion. All destructive actions use modal confirmation prompts.
+The main menu offers Backup, Restore, Rename world, and Quit. Tables show filename, world name, played time, creation time, and installation. Restore selection also exposes deletion. Deleting a backup refreshes the list and closes the selection dialog when no backups remain; only choosing Restore or activating a table row opens destination selection. Dialog buttons consume their acceptance events so other actions cannot activate the default button. All destructive actions use modal confirmation prompts.
 
 ## Verification
 

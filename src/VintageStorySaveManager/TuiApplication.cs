@@ -434,12 +434,18 @@ internal sealed class TuiApplication
         ShadowStyle = ShadowStyle.None
     };
 
-    private static Button DialogButton(string text, bool isDefault = false) => new()
+    internal static Button DialogButton(string text, bool isDefault = false)
     {
-        Text = text,
-        IsDefault = isDefault,
-        ShadowStyle = ShadowStyle.None
-    };
+        var button = new Button
+        {
+            Text = text,
+            IsDefault = isDefault,
+            ShadowStyle = ShadowStyle.None
+        };
+        // Each button owns its action; do not forward acceptance to the default button.
+        button.Accepting += (_, args) => args.Cancel = true;
+        return button;
+    }
 
     private static void FocusTableWhenReady(Dialog dialog, TableView table) =>
         dialog.Ready += (_, _) => table.SetFocus();
