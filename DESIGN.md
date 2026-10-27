@@ -1,5 +1,7 @@
 # Design and implementation plan
 
+The [original requirements](docs/rfc/0001-original-requirements.md) establish the product baseline. Subsequent functionality and behavior changes are recorded as numbered proposals in [docs/rfc/](docs/rfc/), following the [RFC process](docs/rfc/README.md), with requirements, implementation tasks, and verification criteria. This document describes implemented design; accepted proposals remain planned until their implementation is complete.
+
 ## Architecture
 
 `vsm` is a single .NET 10 application. It owns discovery, SQLite access, safe file operations, command-line parsing, and the interactive `Terminal.Gui` UI.

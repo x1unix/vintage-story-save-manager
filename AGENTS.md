@@ -8,11 +8,20 @@ Treat save files as irreplaceable user data. Correctness and recoverability take
 
 ## Source of truth
 
-- Product requirements: `REQUIREMENTS.md`.
+- Original product requirements: `docs/rfc/0001-original-requirements.md`.
+- Feature proposals, change requirements, and implementation tasks: numbered documents in `docs/rfc/`; process guidance: `docs/rfc/README.md`.
 - Architecture and implementation decisions: `DESIGN.md`.
 - User-facing build and usage instructions: `README.md`.
 
 Keep these documents consistent when behavior, commands, paths, or safety guarantees change.
+
+## Change proposals
+
+- Record future functionality, improvements, and behavior changes in `docs/rfc/NNNN-short-title.md` before implementation. Use the next available number. Keep status and tasks in the RFC itself; do not maintain an entry list in `docs/rfc/README.md`.
+- Include status, motivation, requirements, design and safety considerations, implementation tasks, and verification/acceptance criteria. Distinguish planned behavior from implemented behavior.
+- Follow approval already given in the conversation; documenting an accepted plan does not require asking for approval again.
+- Update the RFC's tasks and status as work progresses. Accepted RFCs extend the original requirements; preserve `docs/rfc/0001-original-requirements.md` as the baseline and describe later changes in their own RFCs.
+- Keep `DESIGN.md` and `README.md` aligned with implemented behavior and link relevant RFCs. Routine fixes that restore documented behavior can reference the existing RFC rather than creating a new proposal.
 
 ## Architecture constraints
 

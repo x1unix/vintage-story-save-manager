@@ -2,6 +2,10 @@
 
 A .NET 10 terminal application for inspecting, backing up, restoring, repairing, deleting, and renaming Vintage Story saves. It supports both Flatpak and native data locations and uses the installed game's own protobuf-net model to read and update save metadata.
 
+## Requirements and changes
+
+The [docs/rfc/ directory](docs/rfc/) contains the [original requirements](docs/rfc/0001-original-requirements.md) and proposals for subsequent improvements. Follow the [RFC process](docs/rfc/README.md) to record new functionality and behavior changes before implementation, and track their tasks and status in the relevant RFC. [DESIGN.md](DESIGN.md) describes the implemented architecture; this README describes available functionality.
+
 ## Build
 
 ```sh
