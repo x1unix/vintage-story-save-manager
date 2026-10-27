@@ -80,12 +80,13 @@ internal sealed class TuiApplication
         }
 
         EnsureReadable(selected);
-        if (!Confirm("Create backup", $"Back up {selected.FileName}\nWorld: {selected.WorldName}?", "Back up"))
+        var note = PromptBackupNote(selected);
+        if (note is null)
         {
             return;
         }
 
-        var result = _repository.Backup(selected);
+        var result = _repository.Backup(selected, note);
         MessageBox.Query("Backup complete", $"Created:\n{result.Path}", "OK");
     });
 
@@ -285,6 +286,7 @@ internal sealed class TuiApplication
         var restore = DialogButton("_Restore", isDefault: true);
         dialog.AddButton(cancel);
         dialog.AddButton(delete);
+        dialog.AddButton(NoteButton(items, table));
         dialog.AddButton(restore);
         cancel.Accepting += (_, _) => Application.RequestStop(dialog);
         restore.Accepting += (_, _) =>
@@ -338,6 +340,10 @@ internal sealed class TuiApplication
         var cancel = DialogButton("_Cancel");
         var accept = DialogButton(actionText, isDefault: true);
         dialog.AddButton(cancel);
+        if (entries.Any(entry => entry.IsBackup))
+        {
+            dialog.AddButton(NoteButton(entries, table));
+        }
         dialog.AddButton(accept);
         cancel.Accepting += (_, _) => Application.RequestStop(dialog);
         accept.Accepting += (_, _) =>
@@ -420,6 +426,57 @@ internal sealed class TuiApplication
         return result;
     }
 
+    private static string? PromptBackupNote(SaveEntry source)
+    {
+        string? result = null;
+        using var dialog = FormDialog("Create backup", 70, 11);
+        var summary = new Label { Text = $"Back up {source.FileName}\nWorld: {source.WorldName}", X = 1, Y = 1 };
+        var label = new Label { Text = "Note (optional):", X = 1, Y = 4 };
+        var field = new TextField { X = 1, Y = 5, Width = Dim.Fill(1) };
+        var cancel = DialogButton("_Cancel");
+        var accept = DialogButton("_Back up", isDefault: true);
+        dialog.AddButton(cancel);
+        dialog.AddButton(accept);
+        cancel.Accepting += (_, _) => Application.RequestStop(dialog);
+        accept.Accepting += (_, _) =>
+        {
+            result = field.Text;
+            Application.RequestStop(dialog);
+        };
+        dialog.Add(summary, label, field);
+        dialog.Ready += (_, _) => field.SetFocus();
+        Application.Run(dialog);
+        return result;
+    }
+
+    private static Button NoteButton(IReadOnlyList<SaveEntry> entries, TableView table)
+    {
+        var button = DialogButton("View _note");
+        button.Accepting += (_, _) =>
+        {
+            var entry = Selected(entries, table);
+            if (entry is null) return;
+            using var dialog = SelectionDialog($"Note: {entry.FileName}");
+            var text = new TextView
+            {
+                Text = BackupNotes.Display(entry.NoteError ?? entry.Note ?? "No note.", multiline: true),
+                ReadOnly = true,
+                WordWrap = true,
+                X = 1,
+                Y = 1,
+                Width = Dim.Fill(1),
+                Height = Dim.Fill(2)
+            };
+            var close = DialogButton("_Close", isDefault: true);
+            close.Accepting += (_, _) => Application.RequestStop(dialog);
+            dialog.Add(text);
+            dialog.AddButton(close);
+            dialog.Ready += (_, _) => text.SetFocus();
+            Application.Run(dialog);
+        };
+        return button;
+    }
+
     private string? PromptText(string title, string labelText, string initial, string actionText)
     {
         string? result = null;
@@ -441,15 +498,50 @@ internal sealed class TuiApplication
         return result;
     }
 
-    private static TableView EntryTable(IEnumerable<SaveEntry> entries)
+    internal static TableView EntryTable(IEnumerable<SaveEntry> entries)
     {
-        var data = SaveTableSchema();
-        foreach (var entry in entries)
+        var items = entries.ToArray();
+        var backups = items.Any(entry => entry.IsBackup);
+        var data = SaveTableSchema(includeNote: backups);
+        foreach (var entry in items)
         {
-            data.Rows.Add(entry.FileName, entry.WorldName, entry.Played, entry.Created, entry.Location.Name);
+            var values = new List<object> { entry.FileName, entry.WorldName, entry.Played, entry.Created };
+            if (backups) values.Add(entry.NoteDisplay);
+            values.Add(entry.Location.Name);
+            data.Rows.Add(values.ToArray());
         }
 
-        return CreateTable(data);
+        var table = CreateTable(data);
+        if (backups) ConfigureBackupColumns(table, data);
+        return table;
+    }
+
+    private static void ConfigureBackupColumns(TableView table, DataTable data)
+    {
+        const int noteColumn = 4;
+        var fixedWidth = 0;
+        for (var column = 0; column < data.Columns.Count; column++)
+        {
+            if (column == noteColumn) continue;
+            var width = Math.Min(table.MaxCellWidth, Math.Max(
+                data.Columns[column].ColumnName.GetColumns(),
+                data.Rows.Cast<DataRow>().Select(row => (row[column].ToString() ?? string.Empty).GetColumns()).DefaultIfEmpty(0).Max()));
+            var style = table.Style.GetOrCreateColumnStyle(column);
+            style.MinWidth = style.MaxWidth = width;
+            fixedWidth += width;
+        }
+
+        table.Style.ExpandLastColumn = false;
+        table.MaxCellWidth = int.MaxValue;
+        var noteStyle = table.Style.GetOrCreateColumnStyle(noteColumn);
+        void ResizeNote()
+        {
+            // Each column has a separator, plus the leading table edge.
+            var width = Math.Max("Note".Length, table.Viewport.Width - fixedWidth - data.Columns.Count - 1);
+            noteStyle.MinWidth = noteStyle.MaxWidth = width;
+        }
+        table.ViewportChanged += (_, _) => ResizeNote();
+        ResizeNote();
     }
 
     private static TableView DestinationTable(IEnumerable<DestinationOption> options)
@@ -469,13 +561,14 @@ internal sealed class TuiApplication
         return CreateTable(data);
     }
 
-    private static DataTable SaveTableSchema()
+    private static DataTable SaveTableSchema(bool includeNote = false)
     {
         var data = new DataTable();
         data.Columns.Add("Filename");
         data.Columns.Add("World");
         data.Columns.Add("Played");
         data.Columns.Add("Created");
+        if (includeNote) data.Columns.Add("Note");
         data.Columns.Add("Installation");
         return data;
     }

@@ -33,18 +33,85 @@ internal sealed class SaveRepository
         return ReadEntry(destination, session.Source.Location, isBackup: false);
     }
 
-    public SaveEntry Backup(SaveEntry source)
+    public SaveEntry Backup(SaveEntry source, string? note = null)
     {
         if (source.IsBackup)
         {
             throw new UserFacingException("Only a live save can be backed up.");
         }
 
-        Directory.CreateDirectory(source.Location.BackupDirectory);
-        var stem = $"{DateTime.Now:yyyy-MM-dd_HH-mm-ss}-{Path.GetFileNameWithoutExtension(source.FileName)}";
-        var destination = UniquePath(source.Location.BackupDirectory, stem, ".vcdbs");
-        SnapshotDatabase(source.Path, destination);
-        return ReadEntry(destination, source.Location, isBackup: true);
+        var directory = source.Location.BackupDirectory;
+        var stem = $"{DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture)}-{Path.GetFileNameWithoutExtension(source.FileName)}";
+        var destination = Path.Combine(directory, stem + ".vcdbs");
+        var temporary = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
+        var temporaryNote = temporary + ".note";
+        var notePath = BackupNotes.PathFor(destination);
+        var databasePublished = false;
+        var notePublished = false;
+        note = string.IsNullOrWhiteSpace(note) ? null : note;
+        try
+        {
+            BackupNotes.EnsureDirectory(directory);
+            Directory.CreateDirectory(directory);
+            destination = UniqueBackupPath(directory, stem);
+            notePath = BackupNotes.PathFor(destination);
+            SnapshotDatabase(source.Path, temporary);
+            using (var connection = Open(temporary, SqliteOpenMode.ReadWrite))
+            using (var command = connection.CreateCommand())
+            {
+                // A staged snapshot is exclusively ours. Close WAL mode before publication
+                // so validation does not leave temporary -wal/-shm files behind.
+                command.CommandText = "PRAGMA journal_mode=DELETE";
+                command.ExecuteScalar();
+                command.CommandText = "PRAGMA integrity_check";
+                if (!string.Equals(command.ExecuteScalar() as string, "ok", StringComparison.Ordinal))
+                {
+                    throw new UserFacingException("Backup failed SQLite integrity validation.");
+                }
+            }
+
+            _ = ReadMetadata(temporary);
+            if (note is not null)
+            {
+                using var stream = new FileStream(temporaryNote, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                using var writer = new StreamWriter(stream, BackupNotes.Encoding);
+                writer.Write(note);
+            }
+
+            BackupNotes.EnsureDirectory(directory);
+            if (PathOccupied(notePath))
+            {
+                throw new UserFacingException("A note already exists for the chosen backup filename. Try creating the backup again.");
+            }
+
+            File.Move(temporary, destination, overwrite: false);
+            databasePublished = true;
+            if (note is not null)
+            {
+                File.Move(temporaryNote, notePath, overwrite: false);
+                notePublished = true;
+            }
+
+            return ReadEntry(destination, source.Location, isBackup: true);
+        }
+        catch (Exception exception)
+        {
+            if (notePublished) TryDelete(notePath);
+            if (databasePublished) TryDelete(destination);
+            if (exception is IOException or UnauthorizedAccessException or SqliteException or System.Text.EncoderFallbackException)
+            {
+                throw new UserFacingException($"Could not create backup: {exception.Message}", exception);
+            }
+
+            throw;
+        }
+        finally
+        {
+            TryDelete(temporary);
+            TryDelete(temporaryNote);
+            TryDelete(temporary + "-wal");
+            TryDelete(temporary + "-shm");
+        }
     }
 
     public SaveEntry Restore(RestoreRequest request)
@@ -115,7 +182,23 @@ internal sealed class SaveRepository
             throw new UserFacingException("Refusing to delete a file outside a managed backup directory.");
         }
 
-        File.Delete(backup.Path);
+        if (!_locations.Contains(backup.Location) ||
+            !ListBackups().Any(entry => string.Equals(entry.Path, backup.Path, StringComparison.Ordinal)))
+        {
+            throw new UserFacingException("Refusing to delete a file that was not discovered as a managed backup.");
+        }
+
+        try
+        {
+            BackupNotes.EnsureDirectory(backup.Location.BackupDirectory);
+            File.Delete(backup.Path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new UserFacingException($"Could not delete backup '{backup.FileName}': {exception.Message}", exception);
+        }
+
+        BackupNotes.DeleteQuietly(backup.Path, backup.Location);
     }
 
     public string NewSavePath(SaveLocation location, string fileNameWithoutExtension)
@@ -196,6 +279,7 @@ internal sealed class SaveRepository
             error = exception.Message;
         }
 
+        var (note, noteError) = isBackup ? BackupNotes.Read(path, location) : (null, (string?)null);
         var fileName = Path.GetFileName(path);
         var prefix = isBackup ? "backup/" : string.Empty;
         return new SaveEntry(
@@ -206,7 +290,9 @@ internal sealed class SaveRepository
             isBackup,
             GetCreationTime(path),
             metadata,
-            error);
+            error,
+            note,
+            noteError);
     }
 
     private SaveMetadata ReadMetadata(string path) => _codec.Read(ReadGameData(path));
@@ -306,16 +392,18 @@ internal sealed class SaveRepository
         };
     }
 
-    private static string UniquePath(string directory, string stem, string extension)
+    internal static string UniqueBackupPath(string directory, string stem)
     {
-        var candidate = Path.Combine(directory, stem + extension);
-        for (var suffix = 2; File.Exists(candidate); suffix++)
+        var candidate = Path.Combine(directory, stem + ".vcdbs");
+        for (var suffix = 2; PathOccupied(candidate) || PathOccupied(BackupNotes.PathFor(candidate)); suffix++)
         {
-            candidate = Path.Combine(directory, $"{stem}-{suffix}{extension}");
+            candidate = Path.Combine(directory, $"{stem}-{suffix}.vcdbs");
         }
 
         return candidate;
     }
+
+    private static bool PathOccupied(string path) => Path.Exists(path) || new FileInfo(path).LinkTarget is not null;
 
     private static DateTime GetCreationTime(string path)
     {

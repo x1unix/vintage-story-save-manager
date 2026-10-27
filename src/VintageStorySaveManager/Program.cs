@@ -51,7 +51,7 @@ internal static class Program
             Usage:
               vsm                                      Open the interactive TUI
               vsm list [saves|backups] [--json]
-              vsm backup --save <id|filename|path> [--json]
+              vsm backup --save <id|filename|path> [--note <text>] [--json]
               vsm restore --backup <id|filename|path> --destination <id|filename|path>
                           [--backup-existing] [--world-name <name>] [--yes] [--json]
               vsm restore --backup <id|filename|path> --new <filename>
@@ -60,6 +60,9 @@ internal static class Program
               vsm rename --save <id|filename|path> --world-name <name> [--yes] [--json]
               vsm repair --save <id|filename|path> [--backup <id|filename|path>]
                          [--new <filename>] [--json]
+
+            Backup prompts for an optional note in interactive use. --json and redirected input
+            skip the prompt; use --note to supply a note explicitly.
 
             Repair scans only unless --new is supplied. Writing requires a compatible backup
             and a new filename; source saves are never replaced. Close the world before repair.

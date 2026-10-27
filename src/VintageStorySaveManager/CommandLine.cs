@@ -49,10 +49,20 @@ internal sealed class CommandLine
     {
         var source = _repository.ResolveSave(options.Required("save"));
         EnsureReadable(source);
-        var result = _repository.Backup(source);
+        var note = options.Has("note") ? options.Required("note") : null;
+        if (ShouldPromptForNote(options.Has("note"), options.Has("json"), Console.IsInputRedirected))
+        {
+            Console.Error.Write("Backup note (optional; Enter to skip): ");
+            note = Console.ReadLine();
+        }
+
+        var result = _repository.Backup(source, note);
         WriteResult(result, options.Has("json"), $"Backup created: {result.Path}");
         return 0;
     }
+
+    internal static bool ShouldPromptForNote(bool hasNote, bool json, bool inputRedirected) =>
+        !hasNote && !json && !inputRedirected;
 
     private int Restore(ParsedOptions options)
     {
@@ -214,6 +224,11 @@ internal sealed class CommandLine
         foreach (var entry in entries)
         {
             Console.WriteLine($"{entry.Id,-46}  {entry.FileName,-35}  {entry.WorldName,-28}  {entry.Played,9}  {entry.Created,-20}");
+            if (entry.IsBackup)
+            {
+                Console.WriteLine($"  Note: {entry.NoteDisplay}");
+            }
+
             if (entry.Error is not null)
             {
                 Console.WriteLine($"  error: {entry.Error}");
@@ -238,6 +253,8 @@ internal sealed class CommandLine
         Created = entry.Created,
         Location = entry.Location.Name,
         entry.IsBackup,
+        entry.Note,
+        entry.NoteError,
         entry.Error
     };
 
@@ -249,7 +266,7 @@ internal sealed class CommandLine
             Usage:
               vsm                                      Open the interactive TUI
               vsm list [saves|backups] [--json]
-              vsm backup --save <id|filename|path> [--json]
+              vsm backup --save <id|filename|path> [--note <text>] [--json]
               vsm restore --backup <id|filename|path> --destination <id|filename|path>
                           [--backup-existing] [--world-name <name>] [--yes] [--json]
               vsm restore --backup <id|filename|path> --new <filename>
@@ -258,6 +275,9 @@ internal sealed class CommandLine
               vsm rename --save <id|filename|path> --world-name <name> [--yes] [--json]
               vsm repair --save <id|filename|path> [--backup <id|filename|path>]
                          [--new <filename>] [--json]
+
+            Backup prompts for an optional note in interactive use. --json and redirected input
+            skip the prompt; use --note to supply a note explicitly.
 
             Repair scans only unless --new is supplied. Writing requires a compatible backup
             and a new filename; source saves are never replaced. Close the world before repair.

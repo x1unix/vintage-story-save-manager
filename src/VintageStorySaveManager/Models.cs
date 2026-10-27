@@ -34,14 +34,17 @@ internal sealed record SaveEntry(
     bool IsBackup,
     DateTime CreatedAt,
     SaveMetadata? Metadata,
-    string? Error)
+    string? Error,
+    string? Note = null,
+    string? NoteError = null)
 {
     public string WorldName => Metadata?.WorldName ?? "<unreadable>";
     public string Played => Metadata?.PlayedDisplay ?? "—";
     public string Created => CreatedAt.ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture);
+    public string NoteDisplay => BackupNotes.Display(NoteError ?? Note);
 
     public string DisplayLine =>
-        $"{FileName,-35}  {WorldName,-28}  {Played,9}  {Created,-20}  [{Location.Name}]";
+        $"{FileName,-35}  {WorldName,-28}  {Played,9}  {Created,-20}  [{Location.Name}]" + (IsBackup ? $"  {NoteDisplay}" : string.Empty);
 }
 
 internal sealed record RestoreRequest(

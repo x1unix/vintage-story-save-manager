@@ -49,6 +49,22 @@ Backups are stored in each installation's existing `Saves/backup` directory and 
 
 When both installations exist, entries are qualified by location (for example, `flatpak:main.vcdbs` and `native:main.vcdbs`). A full path, qualified ID, or unique filename can be supplied to CLI commands.
 
+## Backup notes
+
+When creating a backup, the TUI confirmation includes an optional note field. The CLI prompts for a note in interactive use, or accepts one directly:
+
+```sh
+vsm backup --save flatpak:main.vcdbs --note "Before exploring" --json
+```
+
+Empty or whitespace-only input creates no note. With redirected input or `--json`, the CLI skips prompting; use `--note` to provide a note explicitly. Automatic safety backups during restore have no note.
+
+Notes are UTF-8 sidecars: `foo.vcdbs` has its note at `foo.note.txt` in the same backup directory. Notes never enter savegame data and are not copied into restored or repaired live saves. Existing backups without notes work as before.
+
+CLI backup lists show notes, and JSON results include `Note` and `NoteError` (null when absent). Restore and repair backup tables include a Note column before Installation that fills the remaining table width while Installation stays compact; **View note** opens the full note in a scrollable dialog. Terminal displays suppress control characters; JSON preserves note text. An unreadable note is reported separately and does not block restoring a valid backup.
+
+Deleting a backup also attempts to delete its note. Note cleanup failures are silently ignored. New backup names avoid existing databases and note sidecars, including orphaned notes. Note access requires a backup directory without symbolic links in its path; note reads also reject symbolic-link sidecars.
+
 ## Safety
 
 Backups and restore staging use SQLite's online backup API. Replacements and world renames are prepared and validated in a sibling temporary database before an atomic move. Existing files are never deleted as an intermediate step.
