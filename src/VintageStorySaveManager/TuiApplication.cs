@@ -24,28 +24,13 @@ internal sealed class TuiApplication
                 Arrangement = ViewArrangement.Fixed,
                 ShadowStyle = ShadowStyle.None
             };
-            AddVimFocusBindings(window);
-
-            var heading = new Label
+            var tabs = CreateTabs();
+            window.Add(tabs, new Label
             {
-                Text = "Choose an action",
-                X = Pos.Center(),
-                Y = 1
-            };
-            var backup = MenuButton("_Backup save", 3, BackupWorkflow);
-            var restore = MenuButton("_Restore backup", 5, RestoreWorkflow);
-            var rename = MenuButton("_Rename world", 7, RenameWorkflow);
-            var repair = MenuButton("R_epair save", 9, RepairWorkflow);
-            var quit = MenuButton("_Quit", 11, () => Application.RequestStop(window));
-
-            var hint = new Label
-            {
-                Text = "Tables show filename, world, play time, creation time, and installation.",
-                X = Pos.Center(),
-                Y = 14
-            };
-
-            window.Add(heading, backup, restore, rename, repair, quit, hint);
+                Text = "[/] tabs | Tab/Shift+Tab focus | Arrows or h/j/k/l move | Esc quit",
+                Y = Pos.AnchorEnd(1),
+                Width = Dim.Fill()
+            });
             Application.Run(window);
         }
         finally
@@ -54,31 +39,47 @@ internal sealed class TuiApplication
         }
     }
 
-    private static Button MenuButton(string text, int y, Action action)
+    internal TabView CreateTabs()
     {
-        var button = new Button
+        var tabs = new TabView { Width = Dim.Fill(), Height = Dim.Fill(1) };
+        var screens = new Dictionary<Tab, EntryScreen>();
+        void AddScreen(string title, bool backups, string actionText, Action<SaveEntry> action)
         {
-            Text = text,
-            X = Pos.Center(),
-            Y = y,
-            Width = 26,
-            ShadowStyle = ShadowStyle.None
-        };
-        button.Accepting += (_, _) =>
-        {
-            action();
-        };
-        return button;
-    }
-
-    private void BackupWorkflow() => Guard(() =>
-    {
-        var selected = SelectEntry("Select save to back up", _repository.ListSaves(), "_Back up");
-        if (selected is null)
-        {
-            return;
+            var screen = new EntryScreen(
+                backups ? _repository.ListBackups : _repository.ListSaves,
+                actionText, action, backups, Guard);
+            if (backups)
+            {
+                screen.AddAction("_Delete", entry =>
+                {
+                    if (Confirm("Delete backup", $"Permanently delete {entry.FileName}?", "Delete"))
+                        _repository.DeleteBackup(entry);
+                });
+                screen.AddNoteAction();
+            }
+            var tab = new Tab { DisplayText = title, View = screen };
+            screens.Add(tab, screen);
+            tabs.AddTab(tab, andSelect: false);
         }
 
+        AddScreen("Backup save", false, "_Back up", BackupWorkflow);
+        AddScreen("Restore backup", true, "_Restore", RestoreWorkflow);
+        AddScreen("Rename world", false, "_Rename", RenameWorkflow);
+        AddScreen("Repair save", false, "_Select", RepairWorkflow);
+        tabs.SelectedTabChanged += (_, args) => Guard(() => screens[args.NewTab].Refresh());
+        tabs.KeyDown += (_, key) =>
+        {
+            if (key == new Key('[') || key == new Key(']'))
+            {
+                tabs.SwitchTabBy(key == new Key('[') ? -1 : 1);
+                key.Handled = true;
+            }
+        };
+        return tabs;
+    }
+
+    private void BackupWorkflow(SaveEntry selected)
+    {
         EnsureReadable(selected);
         var note = PromptBackupNote(selected);
         if (note is null)
@@ -88,16 +89,10 @@ internal sealed class TuiApplication
 
         var result = _repository.Backup(selected, note);
         MessageBox.Query("Backup complete", $"Created:\n{result.Path}", "OK");
-    });
+    }
 
-    private void RestoreWorkflow() => Guard(() =>
+    private void RestoreWorkflow(SaveEntry backup)
     {
-        var backup = SelectBackupForRestore();
-        if (backup is null)
-        {
-            return;
-        }
-
         EnsureReadable(backup);
         var saves = _repository.ListSaves();
         var destinationOptions = saves
@@ -150,16 +145,10 @@ internal sealed class TuiApplication
 
         var restored = _repository.Restore(request);
         MessageBox.Query("Restore complete", $"Restored:\n{restored.Path}", "OK");
-    });
+    }
 
-    private void RenameWorkflow() => Guard(() =>
+    private void RenameWorkflow(SaveEntry selected)
     {
-        var selected = SelectEntry("Select save whose world should be renamed", _repository.ListSaves(), "_Rename");
-        if (selected is null)
-        {
-            return;
-        }
-
         EnsureReadable(selected);
         var newName = PromptText("Rename world", "World name:", selected.WorldName, "Rename");
         if (newName is null)
@@ -175,16 +164,10 @@ internal sealed class TuiApplication
 
         var result = _repository.RenameWorld(selected, newName);
         MessageBox.Query("Rename complete", $"World renamed to '{result.WorldName}'.", "OK");
-    });
+    }
 
-    private void RepairWorkflow() => Guard(() =>
+    private void RepairWorkflow(SaveEntry source)
     {
-        var source = SelectEntry("Select save to scan or repair", _repository.ListSaves(), "_Select");
-        if (source is null)
-        {
-            return;
-        }
-
         var mode = MessageBox.Query("Repair save",
             "Close this world in Vintage Story before continuing.\nScan for damaged world records, or choose a backup to use for repair.\nRepairs are written to a new save file.",
             "Cancel", "Scan only", "Choose backup");
@@ -226,7 +209,7 @@ internal sealed class TuiApplication
 
         var result = RunRepairTask("Writing and validating repair", token => _repository.CompleteRepair(session, filename, token));
         MessageBox.Query("Repair complete", $"Created:\n{result.Path}\n\nRestored {report.DamagedRecords} records.\nWorld name: {result.WorldName}\nTest this copy in Vintage Story.", "OK");
-    });
+    }
 
     private static T RunRepairTask<T>(string title, Func<CancellationToken, T> work)
     {
@@ -264,64 +247,6 @@ internal sealed class TuiApplication
         };
         Application.Run(dialog);
         return (task ?? throw new UserFacingException("The repair task did not start.")).GetAwaiter().GetResult();
-    }
-
-    private SaveEntry? SelectBackupForRestore()
-    {
-        var entries = _repository.ListBackups();
-        if (entries.Count == 0)
-        {
-            MessageBox.Query("No backups", "No backups were found.", "OK");
-            return null;
-        }
-
-        SaveEntry? selected = null;
-        using var dialog = SelectionDialog("Select backup to restore");
-        var items = entries.ToList();
-        var table = EntryTable(items);
-        dialog.Add(table);
-        FocusTableWhenReady(dialog, table);
-        var cancel = DialogButton("_Cancel");
-        var delete = DialogButton("_Delete");
-        var restore = DialogButton("_Restore", isDefault: true);
-        dialog.AddButton(cancel);
-        dialog.AddButton(delete);
-        dialog.AddButton(NoteButton(items, table));
-        dialog.AddButton(restore);
-        cancel.Accepting += (_, _) => Application.RequestStop(dialog);
-        restore.Accepting += (_, _) =>
-        {
-            selected = Selected(items, table);
-            Application.RequestStop(dialog);
-        };
-        delete.Accepting += (_, _) =>
-        {
-            var item = Selected(items, table);
-            if (item is not null && Confirm("Delete backup", $"Permanently delete {item.FileName}?", "Delete"))
-            {
-                _repository.DeleteBackup(item);
-                var index = table.SelectedRow;
-                items.RemoveAt(index);
-                ((DataTableSource)table.Table).DataTable.Rows.RemoveAt(index);
-                table.Update();
-                if (items.Count == 0)
-                {
-                    Application.RequestStop(dialog);
-                }
-                else
-                {
-                    table.SetSelection(0, Math.Min(index, items.Count - 1), false);
-                }
-            }
-
-        };
-        table.CellActivated += (_, _) =>
-        {
-            selected = Selected(items, table);
-            Application.RequestStop(dialog);
-        };
-        Application.Run(dialog);
-        return selected;
     }
 
     private SaveEntry? SelectEntry(string title, IReadOnlyList<SaveEntry> entries, string actionText)
@@ -449,7 +374,7 @@ internal sealed class TuiApplication
         return result;
     }
 
-    private static Button NoteButton(IReadOnlyList<SaveEntry> entries, TableView table)
+    internal static Button NoteButton(IReadOnlyList<SaveEntry> entries, TableView table)
     {
         var button = DialogButton("View _note");
         button.Accepting += (_, _) =>
@@ -502,6 +427,24 @@ internal sealed class TuiApplication
     {
         var items = entries.ToArray();
         var backups = items.Any(entry => entry.IsBackup);
+        var table = CreateTable(EntryData(items, backups));
+        if (backups)
+        {
+            ConfigureBackupColumns(table, ((DataTableSource)table.Table).DataTable);
+        }
+        return table;
+    }
+
+    internal static void UpdateEntryTable(TableView table, IReadOnlyList<SaveEntry> entries, bool backups)
+    {
+        var data = EntryData(entries, backups);
+        table.Table = new DataTableSource(data);
+        if (backups) ConfigureBackupColumns(table, data);
+        table.Update();
+    }
+
+    private static DataTable EntryData(IEnumerable<SaveEntry> items, bool backups)
+    {
         var data = SaveTableSchema(includeNote: backups);
         foreach (var entry in items)
         {
@@ -511,9 +454,7 @@ internal sealed class TuiApplication
             data.Rows.Add(values.ToArray());
         }
 
-        var table = CreateTable(data);
-        if (backups) ConfigureBackupColumns(table, data);
-        return table;
+        return data;
     }
 
     private static void ConfigureBackupColumns(TableView table, DataTable data)
@@ -523,7 +464,7 @@ internal sealed class TuiApplication
         for (var column = 0; column < data.Columns.Count; column++)
         {
             if (column == noteColumn) continue;
-            var width = Math.Min(table.MaxCellWidth, Math.Max(
+            var width = Math.Min(100, Math.Max(
                 data.Columns[column].ColumnName.GetColumns(),
                 data.Rows.Cast<DataRow>().Select(row => (row[column].ToString() ?? string.Empty).GetColumns()).DefaultIfEmpty(0).Max()));
             var style = table.Style.GetOrCreateColumnStyle(column);
@@ -540,7 +481,6 @@ internal sealed class TuiApplication
             var width = Math.Max("Note".Length, table.Viewport.Width - fixedWidth - data.Columns.Count - 1);
             noteStyle.MinWidth = noteStyle.MaxWidth = width;
         }
-        table.ViewportChanged += (_, _) => ResizeNote();
         ResizeNote();
     }
 
@@ -591,6 +531,11 @@ internal sealed class TuiApplication
         table.Style.AlwaysShowHeaders = true;
         table.Style.ShowVerticalHeaderLines = true;
         table.Style.ShowVerticalCellLines = true;
+        table.ViewportChanged += (_, _) =>
+        {
+            var current = ((DataTableSource)table.Table).DataTable;
+            if (current.Columns.Contains("Note")) ConfigureBackupColumns(table, current);
+        };
         AddVimTableNavigation(table);
         return table;
     }

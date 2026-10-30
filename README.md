@@ -27,7 +27,7 @@ dotnet run --project src/VintageStorySaveManager -- backup --save flatpak:main.v
 
 Use `vsm help` for the full command list after publishing.
 
-In the TUI, use the arrow keys or `h`/`j`/`k`/`l` to navigate menus and save tables. Table headers identify the filename, world, play time, creation time, and installation. Press Enter to activate the selected item and Esc to close the current dialog.
+The TUI opens with **Backup save**, **Restore backup**, **Rename world**, and **Repair save** tabs, each showing its file list directly. Use `[` / `]` to switch tabs, or Tab / Shift+Tab to focus the tab bar and Left / Right to select a tab. Terminal.Gui also supports Home / End and Page Up / Page Down on the tab bar. Tab / Shift+Tab moves between controls; arrows or `h`/`j`/`k`/`l` navigate save tables. Press Enter to act on the selected file. **Refresh** reloads the current list; switching tabs and completing actions also refresh lists while preserving the selected file where possible. **Restore backup** includes Delete and View note actions. Esc closes the current dialog or quits from the main screen. See [RFC 0003](docs/rfc/0003-tabbed-interface.md).
 
 Publish a runnable application to `dist/`:
 
