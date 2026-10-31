@@ -11,12 +11,13 @@ internal sealed class TuiApplication
 
     public void Run()
     {
+        var configuration = new ConfigurationStore();
+        var settings = configuration.Load();
         Application.Init();
         try
         {
-            Button.DefaultShadow = ShadowStyle.None;
-            Dialog.DefaultShadow = ShadowStyle.None;
-            Window.DefaultShadow = ShadowStyle.None;
+            var knownTheme = ThemeManager.Instance.ContainsKey(settings.Theme);
+            ThemePreview.SetTheme(knownTheme ? settings.Theme : "Default");
 
             using var window = new Window
             {
@@ -25,12 +26,27 @@ internal sealed class TuiApplication
                 ShadowStyle = ShadowStyle.None
             };
             var tabs = CreateTabs();
+            var theme = DialogButton("_Theme (F2)");
+            theme.X = Pos.AnchorEnd(14);
+            theme.Y = Pos.AnchorEnd(1);
+            theme.Accepting += (_, _) => Guard(() => ThemePreview.Show(window, configuration));
+            window.KeyDown += (_, key) =>
+            {
+                if (key != Key.F2) return;
+                Guard(() => ThemePreview.Show(window, configuration));
+                key.Handled = true;
+            };
             window.Add(tabs, new Label
             {
-                Text = "[/] tabs | Tab/Shift+Tab focus | Arrows or h/j/k/l move | Esc quit",
+                Text = "[/] tabs | Tab focus | Arrows/hjkl move | Esc quit",
                 Y = Pos.AnchorEnd(1),
-                Width = Dim.Fill()
-            });
+                Width = Dim.Fill(15)
+            }, theme);
+            if (!knownTheme)
+            {
+                MessageBox.Query("Unknown theme",
+                    $"Theme '{settings.Theme}' in '{configuration.FilePath}' is not available. Using Default. Select a theme with F2 to save a replacement.", "OK");
+            }
             Application.Run(window);
         }
         finally
