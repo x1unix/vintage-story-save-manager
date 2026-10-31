@@ -56,6 +56,14 @@ dotnet publish src/VintageStorySaveManager/VintageStorySaveManager.csproj -c Rel
 
 Use `make build`, `make test`, or `make publish` for the corresponding common workflows.
 
+## Inspecting dependencies
+
+- Inspect locally installed libraries before querying remote APIs. NuGet packages normally live in `~/.nuget/packages/`; use `dotnet nuget locals global-packages --list` to find the configured cache. Check the installed version's XML API documentation, README, package metadata, and assemblies; use reflection or decompilation when useful.
+- When implementation details require upstream source, use a local clone at `docs/sources/<library-name>/` (for example, `docs/sources/Terminal.Gui/`). Reuse an existing clone; if it is missing, clone the upstream repository identified by the package metadata into that directory.
+- Inspect the source revision matching the installed package. Prefer the repository commit recorded in its `.nuspec` or Source Link metadata; otherwise use the matching release tag. Fetch the required revision if the existing clone lacks it. Do not assume the upstream default branch matches the installed API.
+- Search and read the local clone with `rg` and filesystem tools instead of making repeated GitHub API calls for individual files. Preserve any existing clone changes when resolving revisions.
+- Keep dependency clones as local reference material only. `docs/sources/` is ignored by Git; never stage or vendor its contents.
+
 ## Code conventions
 
 - Keep nullable reference types enabled and avoid suppressing nullable warnings without a documented reason.
